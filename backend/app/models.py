@@ -209,3 +209,31 @@ class TestExecution(Base):
     raw_source: Mapped[str] = mapped_column(Text, default="{}")
     opensearch_url: Mapped[str] = mapped_column(String(1000), default="")
     last_synced_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+# ---------------------------------------------------------------------
+# Phase 4: Calendar (ICS import — no live Google API, see
+# app/integrations/calendar_integration.py for why)
+# ---------------------------------------------------------------------
+
+
+class CalendarEvent(Base):
+    __tablename__ = "calendar_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_uid: Mapped[str] = mapped_column(String(255), unique=True)
+    title: Mapped[str] = mapped_column(String(500), default="")
+    start_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    end_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    location: Mapped[str] = mapped_column(String(500), default="")
+    organizer_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_organizer: Mapped[bool] = mapped_column(Boolean, default=False)
+    my_rsvp_status: Mapped[str] = mapped_column(String(20), default="NEEDS-ACTION")
+    attendees: Mapped[str] = mapped_column(Text, default="")
+    meeting_link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    calendar_link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    importance: Mapped[str] = mapped_column(String(20), default="NORMAL")
+    importance_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    raw_ics: Mapped[str] = mapped_column(Text, default="")
+    last_synced_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

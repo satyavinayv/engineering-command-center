@@ -7,6 +7,7 @@ from app.api.routes import health as health_routes
 from app.api.routes import jira as jira_routes
 from app.api.routes import sync as sync_routes
 from app.api.routes import tests as tests_routes
+from app.api.routes import calendar_api as calendar_routes
 from app.database import init_db
 from app.services.scheduler import start_scheduler, stop_scheduler
 
@@ -43,3 +44,5 @@ app.include_router(jira_routes.router)
 app.include_router(gitlab_routes.router)
 app.include_router(sync_routes.router)
 app.include_router(tests_routes.router)
+
+app.include_router(calendar_routes.router)

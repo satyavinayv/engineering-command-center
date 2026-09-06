@@ -65,6 +65,22 @@ class Settings(BaseSettings):
     opensearch_verify_ssl: bool = True
 
     calendar_provider: str = ""
+    # Calendar (Phase 4) — ICS-import based
+    calendar_ics_import_dir: str = "./data/calendar_imports"
+    calendar_primary_email: str = ""
+    calendar_manager_email: str = ""
+    calendar_important_keywords: str = (
+        "1:1,sprint planning,retro,release,incident,postmortem"
+    )
+
+    @property
+    def calendar_important_keywords_list(self) -> list[str]:
+        return [
+            k.strip()
+            for k in self.calendar_important_keywords.split(",")
+            if k.strip()
+        ]
+
 
     # Sync intervals (minutes) - configurable per section 33 of the spec
     sync_interval_gmail: int = 5
