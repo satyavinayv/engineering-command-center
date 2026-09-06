@@ -30,3 +30,23 @@ def get_config():
             for i in registry.all()
         ],
     }
+
+
+@router.post("/test-connection/{integration_key}")
+def test_connection(integration_key: str):
+    """Deliberate, on-demand live check - the one place in the app that's
+    allowed to hit an external API synchronously on a user request,
+    since the user explicitly asked "is this working right now?" rather
+    than just loading the dashboard."""
+    integration = registry.get(integration_key)
+    if not integration:
+        return {"error": f"unknown integration '{integration_key}'"}
+    if not integration.is_configured():
+        return {"key": integration_key, "configured": False, "connected": False}
+    status = integration.health_check()
+    return {
+        "key": integration_key,
+        "configured": True,
+        "connected": status.connected,
+        "last_error": status.last_error,
+    }

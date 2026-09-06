@@ -5,6 +5,8 @@ backend/*.db
 backend/.env
 *.pyc
 .pytest_cache/
+venv/
+.venv/
 
 # Node / Next.js
 frontend/node_modules/

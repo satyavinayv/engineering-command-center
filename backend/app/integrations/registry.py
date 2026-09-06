@@ -11,7 +11,10 @@ registered here as they're built in later phases. Phase 1 registers only
 the MockIntegration so the framework itself can be exercised and tested.
 """
 from app.integrations.base import Integration
+from app.integrations.gitlab_integration import GitLabIntegration
+from app.integrations.jira_integration import JiraIntegration
 from app.integrations.mock_integration import MockIntegration
+from app.integrations.opensearch_integration import OpenSearchIntegration
 
 
 class IntegrationRegistry:
@@ -31,9 +34,9 @@ class IntegrationRegistry:
 def build_registry() -> IntegrationRegistry:
     registry = IntegrationRegistry()
     registry.register(MockIntegration())
-    # Phase 2+: registry.register(JiraIntegration(settings))
-    # Phase 2+: registry.register(GitLabIntegration(settings))
-    # Phase 3: registry.register(OpenSearchIntegration(settings))
+    registry.register(JiraIntegration())
+    registry.register(GitLabIntegration())
+    registry.register(OpenSearchIntegration())
     # Phase 4: registry.register(CalendarIntegration(settings))
     # Phase 5: registry.register(GmailIntegration(settings))
     return registry

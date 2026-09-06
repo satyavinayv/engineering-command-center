@@ -57,10 +57,16 @@ added, its own env vars (e.g. `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`,
 
 ## Health monitoring
 
-`GET /health` returns overall status plus a per-integration breakdown
-(connected/disconnected, last successful sync, last error). This is the
-same data section 29 of the spec describes as the "System Health" page —
-the frontend just renders it.
+`GET /health` reads exclusively from the `sync_status` table — it never
+calls Jira/GitLab/etc. live. Health always reflects the last completed
+background sync. This matters: an earlier version of this endpoint
+called each integration's live `health_check()` on every request, which
+both violated the "dashboard never depends on live external calls"
+principle (section 36) and made local test runs flaky depending on
+VPN/credential state. For a deliberate on-demand check (e.g. an admin
+"Test Connection" button), use `POST /config/test-connection/{key}` —
+that's the one place in the app allowed to make a synchronous live call,
+because the user explicitly asked for it.
 
 ## AI layer (not yet built — Phase 7)
 

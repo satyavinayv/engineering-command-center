@@ -26,17 +26,43 @@ class Settings(BaseSettings):
     gmail_app_password: str = ""
 
     jira_base_url: str = ""
-    jira_email: str = ""
     jira_api_token: str = ""
-    jira_jql: str = "assignee = currentUser() OR reporter = currentUser()"
+    jira_jql: str = (
+        '(assignee = currentUser() OR reporter = currentUser() OR (sprint in openSprints()) '
+        'OR (reporter = "vaultAFTUser" AND issuetype in (Automation, Defect) '
+        'AND "Work Type" = "Script Update")) '
+        "AND status not in (Resolved, Closed, \"Running on GM\")"
+    )
 
     gitlab_base_url: str = ""
     gitlab_personal_access_token: str = ""
     gitlab_project_ids: str = ""
+    # Your GitLab username - used to filter "my open MRs" / "assigned to
+    # me for review" without another API round trip.
+    gitlab_username: str = ""
 
     opensearch_host: str = ""
     opensearch_username: str = ""
     opensearch_password: str = ""
+    opensearch_index_pattern: str = "autoresult-*"
+    opensearch_environment: str = "GM"
+    opensearch_window_days: int = 90
+    # Comma-separated Jira issue-type names that count as an Xray test
+    # case (so we know which synced Jira issues to look up executions
+    # for). "Test" is Xray's standard type name - adjust if yours differs.
+    opensearch_test_issue_types: str = "Test"
+    # Field in the OpenSearch document's _source that holds PASS/FAIL.
+    # Left blank until confirmed against a real sample document - see
+    # docs/PHASES.md open questions.
+    opensearch_status_field: str = ""
+    # Optional Kibana/OpenSearch-Dashboards URL template for linking
+    # straight to an execution, e.g.
+    # "https://kibana.example.com/app/discover#/doc/<pattern-id>/{index}?id={doc_id}"
+    # Left blank until confirmed.
+    opensearch_dashboard_url_template: str = ""
+    # Self-hosted ES/OpenSearch behind VPN sometimes uses a self-signed
+    # cert. Flip to False only if you hit SSL errors and know why.
+    opensearch_verify_ssl: bool = True
 
     calendar_provider: str = ""
 
