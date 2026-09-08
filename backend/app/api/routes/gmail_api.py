@@ -9,9 +9,8 @@ routers:
     app.include_router(gmail_router)
 """
 
-from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import require_api_key
 from app.database import SessionLocal
@@ -19,9 +18,23 @@ from app.models import EmailMessage
 
 router = APIRouter(prefix="/api/gmail", tags=["gmail"], dependencies=[Depends(require_api_key)])
 
+# Dashboard-oriented endpoints default small (spec: "small number such
+# as 20") and are capped at 100 regardless of what's requested, so a
+# single query can never pull the whole mailbox into one response.
+_DASHBOARD_DEFAULT = 20
+_DASHBOARD_MAX = 100
+# related-jira/related-gitlab aren't dashboard-critical (they back a
+# detail panel, not the summary), so they get a looser but still
+# bounded default - unbounded .all() is avoided everywhere per spec.
+_DETAIL_DEFAULT = 50
+_DETAIL_MAX = 200
+
 
 @router.get("/messages")
-def list_messages(folder: str | None = None, limit: int = 100) -> list[dict]:
+def list_messages(
+    folder: str | None = None,
+    limit: int = Query(default=_DASHBOARD_DEFAULT, ge=1, le=_DASHBOARD_MAX),
+) -> list[dict]:
     db = SessionLocal()
     try:
         query = db.query(EmailMessage)
@@ -34,13 +47,14 @@ def list_messages(folder: str | None = None, limit: int = 100) -> list[dict]:
 
 
 @router.get("/unread")
-def unread() -> list[dict]:
+def unread(limit: int = Query(default=_DASHBOARD_DEFAULT, ge=1, le=_DASHBOARD_MAX)) -> list[dict]:
     db = SessionLocal()
     try:
         rows = (
             db.query(EmailMessage)
             .filter(EmailMessage.unread.is_(True))
             .order_by(EmailMessage.received_at.desc())
+            .limit(limit)
             .all()
         )
         return [_serialize(r) for r in rows]
@@ -49,7 +63,7 @@ def unread() -> list[dict]:
 
 
 @router.get("/action-required")
-def action_required() -> list[dict]:
+def action_required(limit: int = Query(default=_DASHBOARD_DEFAULT, ge=1, le=_DASHBOARD_MAX)) -> list[dict]:
     """Deterministic floor per spec section 5 — unread + addressed
     directly to you. Phase 7's AI classification will refine this
     further; this endpoint keeps working with or without AI enabled."""
@@ -59,6 +73,7 @@ def action_required() -> list[dict]:
             db.query(EmailMessage)
             .filter(EmailMessage.action_required.is_(True))
             .order_by(EmailMessage.received_at.desc())
+            .limit(limit)
             .all()
         )
         return [_serialize(r) for r in rows]
@@ -67,13 +82,14 @@ def action_required() -> list[dict]:
 
 
 @router.get("/related-jira")
-def related_jira() -> list[dict]:
+def related_jira(limit: int = Query(default=_DETAIL_DEFAULT, ge=1, le=_DETAIL_MAX)) -> list[dict]:
     db = SessionLocal()
     try:
         rows = (
             db.query(EmailMessage)
             .filter(EmailMessage.related_jira_keys != "")
             .order_by(EmailMessage.received_at.desc())
+            .limit(limit)
             .all()
         )
         return [_serialize(r) for r in rows]
@@ -82,13 +98,14 @@ def related_jira() -> list[dict]:
 
 
 @router.get("/related-gitlab")
-def related_gitlab() -> list[dict]:
+def related_gitlab(limit: int = Query(default=_DETAIL_DEFAULT, ge=1, le=_DETAIL_MAX)) -> list[dict]:
     db = SessionLocal()
     try:
         rows = (
             db.query(EmailMessage)
             .filter(EmailMessage.related_gitlab_refs != "")
             .order_by(EmailMessage.received_at.desc())
+            .limit(limit)
             .all()
         )
         return [_serialize(r) for r in rows]

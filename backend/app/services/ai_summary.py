@@ -44,6 +44,50 @@ def _input_hash(action_items: list[dict]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def get_cached_daily_briefing() -> dict:
+    """
+    Non-blocking read for the dashboard (GET /api/ai/daily-briefing).
+
+    Never calls the AI provider, regardless of whether the cached
+    input_hash is stale relative to the current action items - a
+    slightly-stale cached briefing is fine; a dashboard load that
+    blocks on an LLM call is not (spec section 18). Generation is the
+    background scheduler's job (_ai_summary_job) or the explicit
+    POST /api/ai/daily-briefing/regenerate endpoint.
+
+    Returns the same shape as get_or_generate_daily_briefing() so the
+    frontend contract doesn't change: {available, content,
+    generated_by, created_at, cached}.
+    """
+    db = SessionLocal()
+    try:
+        cached = (
+            db.query(AISummary)
+            .filter(AISummary.kind == "daily_briefing")
+            .order_by(AISummary.created_at.desc())
+            .first()
+        )
+
+        if not cached:
+            return {
+                "available": False,
+                "content": None,
+                "generated_by": None,
+                "created_at": None,
+                "cached": False,
+            }
+
+        return {
+            "available": True,
+            "content": cached.content,
+            "generated_by": cached.generated_by,
+            "created_at": cached.created_at.isoformat() if cached.created_at else None,
+            "cached": True,
+        }
+    finally:
+        db.close()
+
+
 def get_or_generate_daily_briefing(force: bool = False) -> dict:
     """
     Return the cached daily briefing when possible.
