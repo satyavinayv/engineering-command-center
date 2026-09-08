@@ -237,3 +237,33 @@ class CalendarEvent(Base):
     importance_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     raw_ics: Mapped[str] = mapped_column(Text, default="")
     last_synced_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)
+
+# ---------------------------------------------------------------------
+# Phase 5: Gmail (IMAP + App Password — no OAuth, see
+# app/integrations/gmail_integration.py)
+# ---------------------------------------------------------------------
+
+class EmailMessage(Base):
+    __tablename__ = "email_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(998), unique=True)
+    folder: Mapped[str] = mapped_column(String(255), default="")
+    subject: Mapped[str] = mapped_column(String(998), default="")
+    from_addr: Mapped[str] = mapped_column(String(500), default="")
+    to_addrs: Mapped[str] = mapped_column(String(1000), default="")
+    cc_addrs: Mapped[str] = mapped_column(String(1000), default="")
+    unread: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_addressed_to_me: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_cc: Mapped[bool] = mapped_column(Boolean, default=False)
+    from_important_sender: Mapped[bool] = mapped_column(Boolean, default=False)
+    related_jira_keys: Mapped[str] = mapped_column(String(500), default="")
+    related_gitlab_refs: Mapped[str] = mapped_column(String(50), default="")
+    action_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    snippet: Mapped[str] = mapped_column(Text, default="")
+    received_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    last_synced_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, default=utcnow
+    )

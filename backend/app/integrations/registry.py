@@ -16,6 +16,7 @@ from app.integrations.jira_integration import JiraIntegration
 from app.integrations.mock_integration import MockIntegration
 from app.integrations.opensearch_integration import OpenSearchIntegration
 from app.integrations.calendar_integration import CalendarIntegration
+from app.integrations.gmail_integration import GmailIntegration
 
 
 class IntegrationRegistry:
@@ -39,7 +40,7 @@ def build_registry() -> IntegrationRegistry:
     registry.register(GitLabIntegration())
     registry.register(OpenSearchIntegration())
     registry.register(CalendarIntegration())
-    # Phase 5: registry.register(GmailIntegration(settings))
+    registry.register(GmailIntegration())
     return registry
 
 

@@ -73,6 +73,22 @@ class Settings(BaseSettings):
         "1:1,sprint planning,retro,release,incident,postmortem"
     )
 
+    # Gmail (Phase 5) — IMAP + App Password, no OAuth
+    gmail_imap_host: str = "imap.gmail.com"
+    gmail_username: str = ""
+    gmail_app_password: str = ""
+    gmail_sync_window_days: int = 2
+    gmail_labels: str = ""
+    gmail_important_senders: str = ""
+
+    @property
+    def gmail_labels_list(self) -> list[str]:
+        return [l.strip() for l in self.gmail_labels.split(",") if l.strip()]
+
+    @property
+    def gmail_important_senders_list(self) -> list[str]:
+        return [s.strip() for s in self.gmail_important_senders.split(",") if s.strip()]
+
     @property
     def calendar_important_keywords_list(self) -> list[str]:
         return [
