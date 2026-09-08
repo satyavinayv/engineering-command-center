@@ -31,11 +31,11 @@ Every sync records:
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 from app.database import SessionLocal
 from app.integrations.base import Integration, IntegrationError
 from app.models import SyncStatus
-
 
 logger = logging.getLogger(__name__)
 
@@ -43,53 +43,72 @@ DEFAULT_BACKFILL_WINDOW_DAYS = 30
 
 
 def run_sync(
-    integration: Integration,
-    backfill_window_days: int = DEFAULT_BACKFILL_WINDOW_DAYS,
-) -> dict:
+        integration: Integration,
+        backfill_window_days: int = DEFAULT_BACKFILL_WINDOW_DAYS,
+) -> dict[str, Any]:
     """
-    Run one synchronization for an integration.
+    Run exactly one synchronization for an integration.
 
-    If a persisted cursor exists, incremental_sync() is used.
+    The runner decides whether this is an initial or incremental sync.
 
-    If no cursor exists, fetch_initial_data() is used.
+    Initial:
+        No persisted cursor exists.
 
-    Returns a small result dictionary for logging and diagnostics.
+    Incremental:
+        A persisted cursor exists.
+
+    The integration is responsible only for fetching and persisting its
+    own domain data. This function is responsible for sync_status.
+
+    Returns:
+        {
+            "integration": str,
+            "sync_type": "initial" | "incremental",
+            "records_fetched": int,
+            "cursor": str | None,
+            "success": bool,
+            "error": str | None,
+        }
     """
+
+    integration_key = integration.key
+    started_at = datetime.now(timezone.utc)
 
     db = SessionLocal()
 
-    started_at = datetime.now(timezone.utc)
-
     try:
+        # ------------------------------------------------------------
+        # Load existing sync status.
+        # ------------------------------------------------------------
         status = (
             db.query(SyncStatus)
-            .filter_by(
-                integration_key=integration.key
-            )
+            .filter_by(integration_key=integration_key)
             .one_or_none()
         )
 
-        sync_type = (
-            "incremental"
-            if status and status.cursor
-            else "initial"
-        )
+        # ------------------------------------------------------------
+        # Decide initial vs incremental.
+        # ------------------------------------------------------------
+        if status is not None and status.cursor:
+            sync_type = "incremental"
+        else:
+            sync_type = "initial"
 
         logger.info(
             "[SYNC] Starting %s sync for '%s'",
             sync_type,
-            integration.key,
+            integration_key,
         )
 
+        # ------------------------------------------------------------
+        # Execute integration sync.
+        # ------------------------------------------------------------
         try:
-            # --------------------------------------------------------
-            # Initial backfill
-            # --------------------------------------------------------
             if sync_type == "initial":
                 logger.info(
-                    "[SYNC] '%s' has no persisted cursor; "
+                    "[SYNC] '%s' has no cursor; "
                     "running initial backfill (%s days)",
-                    integration.key,
+                    integration_key,
                     backfill_window_days,
                 )
 
@@ -97,13 +116,10 @@ def run_sync(
                     window_days=backfill_window_days
                 )
 
-            # --------------------------------------------------------
-            # Incremental sync
-            # --------------------------------------------------------
             else:
                 logger.info(
-                    "[SYNC] '%s' using persisted cursor: %s",
-                    integration.key,
+                    "[SYNC] '%s' using cursor=%r",
+                    integration_key,
                     status.cursor,
                 )
 
@@ -112,67 +128,89 @@ def run_sync(
                 )
 
             # --------------------------------------------------------
-            # Create sync status if this is the first run.
+            # Validate result.
+            # --------------------------------------------------------
+            if result is None:
+                raise IntegrationError(
+                    f"Integration '{integration_key}' returned no SyncResult"
+                )
+
+            records_fetched = int(
+                getattr(result, "records_fetched", 0) or 0
+            )
+
+            result_cursor = getattr(
+                result,
+                "cursor",
+                None,
+            )
+
+            # --------------------------------------------------------
+            # Create status row if this is the first successful sync.
             # --------------------------------------------------------
             if status is None:
                 status = SyncStatus(
-                    integration_key=integration.key
+                    integration_key=integration_key
                 )
                 db.add(status)
 
             # --------------------------------------------------------
-            # Record successful sync.
+            # Record success.
             # --------------------------------------------------------
             status.connected = True
             status.last_sync_at = datetime.now(timezone.utc)
             status.last_error = None
 
-            records_fetched = getattr(
-                result,
-                "records_fetched",
-                0,
-            )
-
             status.records_synced = (
-                (status.records_synced or 0)
-                + records_fetched
+                    (status.records_synced or 0)
+                    + records_fetched
             )
 
-            if result.cursor is not None:
-                status.cursor = result.cursor
+            # Only replace the cursor when the integration returned one.
+            if result_cursor is not None:
+                status.cursor = result_cursor
 
             db.commit()
 
             elapsed = (
-                datetime.now(timezone.utc)
-                - started_at
+                    datetime.now(timezone.utc) - started_at
             ).total_seconds()
 
             logger.info(
-                "[SYNC] Completed %s sync for '%s' "
-                "| records=%s | cursor=%s | %.2fs",
+                "[SYNC] SUCCESS integration='%s' "
+                "type=%s records=%d cursor=%r elapsed=%.2fs",
+                integration_key,
                 sync_type,
-                integration.key,
                 records_fetched,
-                result.cursor,
+                result_cursor,
                 elapsed,
             )
 
             return {
-                "integration": integration.key,
+                "integration": integration_key,
                 "sync_type": sync_type,
                 "records_fetched": records_fetched,
-                "cursor": result.cursor,
+                "cursor": result_cursor,
                 "success": True,
+                "error": None,
             }
 
+        # ------------------------------------------------------------
+        # Expected integration failure.
+        # ------------------------------------------------------------
         except IntegrationError as exc:
-            # --------------------------------------------------------
-            # Expected integration failure.
-            # --------------------------------------------------------
+            db.rollback()
+
+            # Reload status after rollback so the session is clean.
+            status = (
+                db.query(SyncStatus)
+                .filter_by(integration_key=integration_key)
+                .one_or_none()
+            )
+
             if status is None:
                 status = SyncStatus(
-                    integration_key=integration.key
+                    integration_key=integration_key
                 )
                 db.add(status)
 
@@ -181,44 +219,47 @@ def run_sync(
 
             db.commit()
 
+            elapsed = (
+                    datetime.now(timezone.utc) - started_at
+            ).total_seconds()
+
             logger.error(
-                "[SYNC] Integration error for '%s': %s",
-                integration.key,
+                "[SYNC] FAILED integration='%s' "
+                "type=%s error=%s elapsed=%.2fs",
+                integration_key,
+                sync_type,
                 exc,
+                elapsed,
             )
 
             return {
-                "integration": integration.key,
+                "integration": integration_key,
                 "sync_type": sync_type,
                 "records_fetched": 0,
                 "cursor": (
                     status.cursor
-                    if status
+                    if status is not None
                     else None
                 ),
                 "success": False,
                 "error": str(exc),
             }
 
+        # ------------------------------------------------------------
+        # Unexpected programming/runtime failure.
+        # ------------------------------------------------------------
         except Exception as exc:
-            # --------------------------------------------------------
-            # Unexpected failure.
-            #
-            # Important: record it in sync_status as well.
-            # --------------------------------------------------------
             db.rollback()
 
             status = (
                 db.query(SyncStatus)
-                .filter_by(
-                    integration_key=integration.key
-                )
+                .filter_by(integration_key=integration_key)
                 .one_or_none()
             )
 
             if status is None:
                 status = SyncStatus(
-                    integration_key=integration.key
+                    integration_key=integration_key
                 )
                 db.add(status)
 
@@ -229,22 +270,31 @@ def run_sync(
 
             db.commit()
 
+            elapsed = (
+                    datetime.now(timezone.utc) - started_at
+            ).total_seconds()
+
             logger.exception(
-                "[SYNC] Unexpected sync failure for '%s'",
-                integration.key,
+                "[SYNC] UNEXPECTED FAILURE integration='%s' "
+                "type=%s elapsed=%.2fs",
+                integration_key,
+                sync_type,
+                elapsed,
             )
 
             return {
-                "integration": integration.key,
+                "integration": integration_key,
                 "sync_type": sync_type,
                 "records_fetched": 0,
                 "cursor": (
                     status.cursor
-                    if status
+                    if status is not None
                     else None
                 ),
                 "success": False,
-                "error": str(exc),
+                "error": (
+                    f"{type(exc).__name__}: {exc}"
+                ),
             }
 
     finally:

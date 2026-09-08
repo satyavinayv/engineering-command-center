@@ -88,9 +88,11 @@ def dashboard_summary() -> dict:
             .filter(
                 GitLabMergeRequest.reviewers.ilike(f"%{settings.gitlab_username}%"),
                 GitLabMergeRequest.state == "opened",
+                GitLabMergeRequest.computed_state == "WAITING_FOR_REVIEWER",
             )
             .count()
         )
+
         failed_pipeline_count = (
             db.query(GitLabMergeRequest)
             .filter(

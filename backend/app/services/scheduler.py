@@ -1,5 +1,5 @@
 """
-Background sync scheduling.
+Background synchronization scheduler.
 
 Each configured integration runs independently on its own interval.
 
@@ -30,78 +30,159 @@ _gmail_sync_lock = Lock()
 
 def _sync_job(integration_key: str) -> None:
     """
-    Execute one integration sync.
+    Execute exactly one synchronization job.
 
     Each integration is isolated. A failure in one integration does not
-    stop the scheduler or affect the other integrations.
+    stop the scheduler or affect other integrations.
     """
 
     logger.info(
-        "Scheduled sync triggered for integration '%s'",
+        "============================================================"
+    )
+    logger.info(
+        "[SCHEDULER] Triggered integration='%s'",
         integration_key,
     )
 
+    # ------------------------------------------------------------
+    # Look up integration.
+    # ------------------------------------------------------------
     integration = registry.get(integration_key)
 
     if integration is None:
-        logger.warning(
-            "Integration '%s' was NOT FOUND in the registry",
+        logger.error(
+            "[SCHEDULER] Integration '%s' is NOT registered",
             integration_key,
         )
         return
 
-    try:
-        configured = integration.is_configured()
-    except Exception:
-        logger.exception(
-            "Could not determine configuration for integration '%s'",
-            integration_key,
-        )
-        return
+    # ------------------------------------------------------------
+    # Configuration diagnostics.
+    # ------------------------------------------------------------
+    configured = integration.is_configured()
 
+    logger.info(
+        "[SCHEDULER] integration='%s' class='%s' configured=%s",
+        integration_key,
+        integration.__class__.__name__,
+        configured,
+    )
+
+    # Do not log secrets/tokens/passwords.
+    if integration_key == "jira":
+        logger.info(
+            "[SCHEDULER] Jira base_url=%r",
+            getattr(integration, "base_url", None),
+        )
+
+    elif integration_key == "gitlab":
+        logger.info(
+            "[SCHEDULER] GitLab base_url=%r projects=%r",
+            getattr(integration, "base_url", None),
+            getattr(integration, "project_ids", None),
+        )
+
+    elif integration_key == "opensearch":
+        logger.info(
+            "[SCHEDULER] OpenSearch host=%r",
+            getattr(integration, "host", None),
+        )
+
+    elif integration_key == "calendar":
+        logger.info(
+            "[SCHEDULER] Calendar provider=%r",
+            getattr(integration, "provider", None),
+        )
+
+    elif integration_key == "gmail":
+        logger.info(
+            "[SCHEDULER] Gmail configured=%s",
+            configured,
+        )
+
+    # ------------------------------------------------------------
+    # If not configured, let run_sync record the failure.
+    #
+    # We intentionally do NOT return here.
+    # ------------------------------------------------------------
     if not configured:
         logger.warning(
-            "Integration '%s' is registered but NOT CONFIGURED; "
-            "skipping sync",
+            "[SCHEDULER] Integration '%s' is not configured",
             integration_key,
         )
-        return
 
-    lock = None
+    # ------------------------------------------------------------
+    # Gmail lock.
+    # ------------------------------------------------------------
+    lock = (
+        _gmail_sync_lock
+        if integration_key == "gmail"
+        else None
+    )
 
-    if integration_key == "gmail":
-        lock = _gmail_sync_lock
+    if lock is not None:
+        acquired = lock.acquire(blocking=False)
 
-        if not lock.acquire(blocking=False):
+        if not acquired:
             logger.warning(
-                "Gmail sync is already running; "
-                "skipping overlapping run"
+                "[SCHEDULER] Gmail sync is already running; "
+                "skipping overlapping execution"
             )
             return
 
-    try:
-        logger.info(
-            "Starting scheduled sync for integration '%s'",
-            integration_key,
-        )
+    else:
+        acquired = False
 
+    try:
+        # --------------------------------------------------------
+        # Run sync.
+        # --------------------------------------------------------
         result = run_sync(integration)
 
-        logger.info(
-            "Scheduled sync completed for integration '%s': %s",
-            integration_key,
-            result,
-        )
+        # --------------------------------------------------------
+        # IMPORTANT:
+        # run_sync returns success=False for integration failures.
+        # Do not call those successful.
+        # --------------------------------------------------------
+        if result.get("success"):
+            logger.info(
+                "[SCHEDULER] SUCCESS integration='%s' "
+                "type=%s records=%s cursor=%r",
+                integration_key,
+                result.get("sync_type"),
+                result.get("records_fetched"),
+                result.get("cursor"),
+            )
+        else:
+            logger.error(
+                "[SCHEDULER] FAILED integration='%s' "
+                "type=%s error=%s",
+                integration_key,
+                result.get("sync_type"),
+                result.get("error"),
+            )
 
     except Exception:
+        # This should normally not happen because run_sync catches
+        # integration/runtime exceptions itself, but keep this guard
+        # so one scheduler job can never kill the scheduler.
         logger.exception(
-            "Background sync failed for integration '%s'",
+            "[SCHEDULER] Unexpected scheduler failure "
+            "for integration='%s'",
             integration_key,
         )
 
     finally:
-        if lock is not None:
+        if lock is not None and acquired:
             lock.release()
+
+    logger.info(
+        "[SCHEDULER] Finished integration='%s'",
+        integration_key,
+    )
+    logger.info(
+        "============================================================"
+    )
 
 
 def _ai_summary_job() -> None:
@@ -110,6 +191,9 @@ def _ai_summary_job() -> None:
     """
 
     if not settings.ai_enabled:
+        logger.debug(
+            "[AI] AI disabled; skipping summary generation"
+        )
         return
 
     try:
@@ -117,11 +201,17 @@ def _ai_summary_job() -> None:
             get_or_generate_daily_briefing,
         )
 
-        get_or_generate_daily_briefing(force=False)
+        logger.info(
+            "[AI] Running scheduled daily briefing generation"
+        )
+
+        get_or_generate_daily_briefing(
+            force=False
+        )
 
     except Exception:
         logger.exception(
-            "AI summary pre-generation failed"
+            "[AI] Summary pre-generation failed"
         )
 
 
@@ -151,6 +241,20 @@ def start_scheduler() -> None:
         flush=True,
     )
 
+    # ------------------------------------------------------------
+    # Validate intervals.
+    # ------------------------------------------------------------
+    for integration_key, minutes in intervals.items():
+        if minutes <= 0:
+            raise ValueError(
+                f"Invalid sync interval for "
+                f"'{integration_key}': {minutes}. "
+                f"Interval must be greater than zero."
+            )
+
+    # ------------------------------------------------------------
+    # Register integration jobs.
+    # ------------------------------------------------------------
     for integration_key, minutes in intervals.items():
         print(
             f"Registering job: {integration_key} "
@@ -160,19 +264,27 @@ def start_scheduler() -> None:
 
         scheduler.add_job(
             _sync_job,
-            "interval",
+            trigger="interval",
             minutes=minutes,
             args=[integration_key],
             id=f"sync_{integration_key}",
             replace_existing=True,
             max_instances=1,
             coalesce=True,
+
+            # Run immediately when scheduler starts.
             next_run_time=datetime.now(),
         )
 
+    # ------------------------------------------------------------
+    # Register AI summary job.
+    #
+    # Do NOT run this immediately. The first briefing can be
+    # generated on its normal configured interval.
+    # ------------------------------------------------------------
     scheduler.add_job(
         _ai_summary_job,
-        "interval",
+        trigger="interval",
         minutes=settings.ai_summary_interval_minutes,
         id="ai_summary",
         replace_existing=True,
@@ -180,6 +292,9 @@ def start_scheduler() -> None:
         coalesce=True,
     )
 
+    # ------------------------------------------------------------
+    # Start scheduler.
+    # ------------------------------------------------------------
     if not scheduler.running:
         scheduler.start()
 
@@ -187,12 +302,16 @@ def start_scheduler() -> None:
             "========== SCHEDULER STARTED ==========",
             flush=True,
         )
+
     else:
         print(
             "========== SCHEDULER ALREADY RUNNING ==========",
             flush=True,
         )
 
+    # ------------------------------------------------------------
+    # Print registered jobs.
+    # ------------------------------------------------------------
     jobs = scheduler.get_jobs()
 
     print(
@@ -214,7 +333,7 @@ def start_scheduler() -> None:
 
 
 def stop_scheduler() -> None:
-    """Scheduled sync completed
+    """
     Stop the scheduler gracefully.
     """
 
@@ -223,7 +342,9 @@ def stop_scheduler() -> None:
             "Stopping background sync scheduler"
         )
 
-        scheduler.shutdown(wait=False)
+        scheduler.shutdown(
+            wait=False
+        )
 
         logger.info(
             "Background sync scheduler stopped"
