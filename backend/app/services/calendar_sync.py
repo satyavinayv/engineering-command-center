@@ -23,13 +23,21 @@ MEETING_LINK_PATTERN = re.compile(
 
 
 def _as_datetime(field) -> datetime | None:
+    """Returns a naive UTC datetime, matching the convention used
+    everywhere else in this codebase (Jira/GitLab/OpenSearch sync all
+    strip tzinfo before storing) so every DateTime column in the DB is
+    consistently naive-UTC. Storing a mix of naive and tz-aware
+    datetimes in the same SQLite column is a known source of subtle
+    bugs, so we normalize here rather than carrying tzinfo through."""
     if field is None:
         return None
     value = field.dt
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        if value.tzinfo:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
     if isinstance(value, date):
-        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        return datetime(value.year, value.month, value.day)
     return None
 
 
@@ -233,4 +241,3 @@ def persist_ics_file(raw: bytes) -> dict:
         "new": new_count,
         "updated": updated_count,
     }
-

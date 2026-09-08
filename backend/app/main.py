@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes import actions as actions_routes
+from app.api.routes import ai as ai_routes
 from app.api.routes import config as config_routes
 from app.api.routes import gitlab as gitlab_routes
 from app.api.routes import health as health_routes
@@ -48,3 +50,5 @@ app.include_router(sync_routes.router)
 app.include_router(tests_routes.router)
 app.include_router(calendar_routes.router)
 app.include_router(gmail_router.router)
+app.include_router(actions_routes.router)
+app.include_router(ai_routes.router)

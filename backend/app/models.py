@@ -245,7 +245,6 @@ class CalendarEvent(Base):
 
 class EmailMessage(Base):
     __tablename__ = "email_messages"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     message_id: Mapped[str] = mapped_column(String(998), unique=True)
     folder: Mapped[str] = mapped_column(String(255), default="")
@@ -267,3 +266,32 @@ class EmailMessage(Base):
     last_synced_at: Mapped[dt.datetime] = mapped_column(
         DateTime, default=utcnow
     )
+
+
+# ---------------------------------------------------------------------
+# Phase 6: unified action feed has no table of its own - it's computed
+# on read from the tables above (see app/services/action_engine.py).
+# ---------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------
+# Phase 7: AI layer. AI output is cached here and regenerated only when
+# the underlying action items actually change (see
+# app/services/ai_summary.py) - never recomputed live on a dashboard
+# load (spec section 18), and never treated as authoritative (spec
+# section 27 - "AI interpretation -> never authoritative").
+# ---------------------------------------------------------------------
+
+
+class AISummary(Base):
+    __tablename__ = "ai_summaries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(50))  # e.g. "daily_briefing"
+    content: Mapped[str] = mapped_column(Text, default="")
+    # sha256 of the input action-item list (source+priority+key only,
+    # never full content) - lets us skip regenerating when nothing the
+    # AI would comment on has actually changed (spec section 20).
+    input_hash: Mapped[str] = mapped_column(String(64), default="")
+    generated_by: Mapped[str] = mapped_column(String(100), default="")  # provider/model name
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow)

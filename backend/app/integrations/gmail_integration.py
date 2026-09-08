@@ -464,7 +464,7 @@ class GmailIntegration(Integration):
 
                 for message in batch_results:
                     uid = message.get(
-                        "_uid"
+                        "uid"
                     )
 
                     if (

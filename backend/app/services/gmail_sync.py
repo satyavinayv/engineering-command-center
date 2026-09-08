@@ -35,13 +35,17 @@ def _from_important_sender(from_addr: str) -> bool:
 
 
 def _parse_date(date_raw: str | None) -> datetime | None:
+    """Returns naive UTC, matching the convention used everywhere else
+    in this codebase (see the same normalization in calendar_sync.py)."""
     if not date_raw:
         return None
     try:
-        dt = parsedate_to_datetime(date_raw)
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        parsed = parsedate_to_datetime(date_raw)
     except (TypeError, ValueError):
         return None
+    if parsed.tzinfo:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 def persist_messages(messages: list[dict]) -> dict:

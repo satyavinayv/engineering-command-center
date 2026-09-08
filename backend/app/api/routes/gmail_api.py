@@ -11,12 +11,13 @@ routers:
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.deps import require_api_key
 from app.database import SessionLocal
 from app.models import EmailMessage
 
-router = APIRouter(prefix="/api/gmail", tags=["gmail"])
+router = APIRouter(prefix="/api/gmail", tags=["gmail"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/messages")

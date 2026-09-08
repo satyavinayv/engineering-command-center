@@ -75,8 +75,6 @@ class Settings(BaseSettings):
 
     # Gmail (Phase 5) — IMAP + App Password, no OAuth
     gmail_imap_host: str = "imap.gmail.com"
-    gmail_username: str = ""
-    gmail_app_password: str = ""
     gmail_sync_window_days: int = 2
     gmail_labels: str = ""
     gmail_important_senders: str = ""
@@ -104,6 +102,29 @@ class Settings(BaseSettings):
     sync_interval_jira: int = 5
     sync_interval_gitlab: int = 5
     sync_interval_opensearch: int = 5
+
+    # --- Phase 6: Priority Engine (spec section 16) ---
+    # Statuses that mean "done, don't surface as an action item" -
+    # mirrors the JIRA_JQL exclusions so the two stay in sync.
+    jira_done_statuses: str = "Resolved,Closed,Running on GM"
+    # Jira priority names that always mean P0 regardless of anything else
+    action_p0_jira_priorities: str = "Highest,Blocker,Critical"
+
+    @property
+    def jira_done_statuses_list(self) -> list[str]:
+        return [s.strip().lower() for s in self.jira_done_statuses.split(",") if s.strip()]
+
+    @property
+    def action_p0_jira_priorities_list(self) -> list[str]:
+        return [p.strip().lower() for p in self.action_p0_jira_priorities.split(",") if p.strip()]
+
+    # --- Phase 7: AI layer ---
+    openai_model: str = "gpt-4o-mini"
+    # How often the background job pre-generates the daily briefing, so
+    # it's already cached (instant) by the time the dashboard is opened
+    # (spec section 18 - AI must never be in the critical path of a
+    # dashboard load).
+    ai_summary_interval_minutes: int = 15
 
 
 @lru_cache

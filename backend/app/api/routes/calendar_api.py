@@ -13,15 +13,16 @@ app/api/ -- I haven't seen main.py so this mirrors the jira_integration
 import conventions I have seen.)
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 
+from app.api.deps import require_api_key
 from app.database import SessionLocal
 from app.models import CalendarEvent
 
-router = APIRouter(prefix="/api/calendar", tags=["calendar"])
+router = APIRouter(prefix="/api/calendar", tags=["calendar"], dependencies=[Depends(require_api_key)])
 
 
 @router.post("/import")
@@ -30,7 +31,7 @@ async def import_ics(file: UploadFile = File(...)) -> dict:
     Settings -> Import & export -> Export gives you a .zip; unzip it
     and upload the .ics inside (usually named after your email
     address)."""
-    if not file.filename.endswith(".ics"):
+    if not file.filename or not file.filename.endswith(".ics"):
         raise HTTPException(400, "Expected a .ics file")
 
     raw = await file.read()
@@ -40,7 +41,7 @@ async def import_ics(file: UploadFile = File(...)) -> dict:
 
     integration = CalendarIntegration()
     integration.import_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
     (integration.import_dir / f"{stamp}-{file.filename}").write_bytes(raw)
 
     result = persist_ics_file(raw)
@@ -53,7 +54,7 @@ def list_events(upcoming_only: bool = True) -> list[dict]:
     try:
         query = select(CalendarEvent)
         if upcoming_only:
-            query = query.where(CalendarEvent.start_at >= datetime.now(timezone.utc))
+            query = query.where(CalendarEvent.start_at >= datetime.now())
         rows = db.execute(query.order_by(CalendarEvent.start_at.asc())).scalars().all()
         return [_serialize(r) for r in rows]
     finally:
@@ -87,7 +88,7 @@ def pending_response() -> list[dict]:
             .filter(
                 CalendarEvent.is_organizer.is_(False),
                 CalendarEvent.my_rsvp_status == "NEEDS-ACTION",
-                CalendarEvent.start_at >= datetime.now(timezone.utc),
+                CalendarEvent.start_at >= datetime.now(),
             )
             .order_by(CalendarEvent.start_at.asc())
             .all()

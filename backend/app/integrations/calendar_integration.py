@@ -48,14 +48,21 @@ class CalendarIntegration(Integration):
         self.import_dir = Path(settings.calendar_ics_import_dir)
 
     def is_configured(self) -> bool:
-        return bool(settings.calendar_ics_import_dir)
+        # Both matter: the import directory is where files land, but
+        # without calendar_primary_email, RSVP status and "is this
+        # mine?" detection silently produce wrong answers (everything
+        # looks like NEEDS-ACTION / not-organizer) rather than failing
+        # loudly - so we treat it as required, not optional.
+        return bool(settings.calendar_ics_import_dir) and bool(settings.calendar_primary_email)
 
     def authenticate(self) -> None:
         # Nothing to authenticate against -- this is a file-drop
         # integration. We just make sure the import directory exists
         # and is writable, since /api/calendar/import writes into it.
         if not self.is_configured():
-            raise IntegrationAuthError("CALENDAR_ICS_IMPORT_DIR is not set")
+            raise IntegrationAuthError(
+                "CALENDAR_ICS_IMPORT_DIR and/or CALENDAR_PRIMARY_EMAIL is not set"
+            )
         try:
             self.import_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:

@@ -37,11 +37,27 @@ def _sync_job(integration_key: str) -> None:
         logger.exception("Background sync failed for integration '%s'", integration_key)
 
 
+def _ai_summary_job() -> None:
+    """Pre-generates the daily briefing so the dashboard always reads a
+    cached, instant result (spec section 18) instead of triggering a
+    live AI call on page load. No-ops cleanly if AI is disabled."""
+    if not settings.ai_enabled:
+        return
+    try:
+        from app.services.ai_summary import get_or_generate_daily_briefing
+
+        get_or_generate_daily_briefing(force=False)
+    except Exception:  # noqa: BLE001
+        logger.exception("AI summary pre-generation failed")
+
+
 def start_scheduler() -> None:
     intervals = {
         "jira": settings.sync_interval_jira,
         "gitlab": settings.sync_interval_gitlab,
         "opensearch": settings.sync_interval_opensearch,
+        "calendar": settings.sync_interval_calendar,
+        "gmail": settings.sync_interval_gmail,
     }
     for key, minutes in intervals.items():
         scheduler.add_job(
@@ -54,6 +70,14 @@ def start_scheduler() -> None:
         )
     if not scheduler.running:
         scheduler.start()
+
+    scheduler.add_job(
+        _ai_summary_job,
+        "interval",
+        minutes=settings.ai_summary_interval_minutes,
+        id="ai_summary",
+        replace_existing=True,
+    )
 
 
 def stop_scheduler() -> None:

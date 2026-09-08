@@ -46,37 +46,84 @@ current one is checked off.
   disabled (self-signed cert) and whether you have a Kibana/OpenSearch
   Dashboards URL template for direct links to an execution.
 
-- [ ] **Phase 4 — Calendar**
-  Calendar integration (API TBD — see note below), created/accepted/
-  pending-RSVP views, importance rules.
+- [x] **Phase 4 — Calendar** (pivoted approach — see below)
+  Google Calendar API and CalDAV both turned out to require an OAuth
+  app via Google Cloud Console, which is blocked by org policy, and
+  there's no private "secret address in iCal format" URL available
+  either (disabled by the Workspace admin). So this integration works
+  by periodic **.ics export/import** instead: export from Google
+  Calendar (Settings → Import & export), drop the file in
+  `CALENDAR_ICS_IMPORT_DIR` or `POST /api/calendar/import`, and it's
+  parsed and persisted the same way every other integration's data
+  ends up in the DB. "Sync" here means "process any new .ics file",
+  not polling an API. No RSVP write-back (same OAuth blocker) — a
+  reliable link to the real Google Calendar event is provided instead
+  (spec section 6D's documented fallback).
+  Distinguishes created-by-me / accepted / pending-response, and
+  deterministically flags important meetings (manager as organizer or
+  attendee, or a title keyword match).
+  **Fixed during review:** `is_configured()` now also requires
+  `CALENDAR_PRIMARY_EMAIL` — without it, RSVP status and organizer
+  detection silently produced wrong output while still reporting
+  "configured." Also normalized datetime handling to naive UTC to
+  match the rest of the codebase.
 
-- [ ] **Phase 5 — Gmail**
-  IMAP + app-password integration. Sync window defaults to **2 days**
-  (today + yesterday, not the spec's original 7/30/90 default) so
-  today's tasks and yesterday's unfinished ones both surface. Also
-  syncs your custom Gmail labels (via IMAP folders), not just the
-  inbox — each label needs "Show in IMAP" enabled in Gmail settings for
-  this to work. unread/action-required/related-to-Jira-or-GitLab
-  classification (deterministic first).
+- [x] **Phase 5 — Gmail**
+  IMAP + App Password, 2-day sync window, custom label support,
+  deterministic action-required/Jira-link/GitLab-link classification.
+  Header-only IMAP fetch (`BODY.PEEK[HEADER]`, not full body) for speed
+  — trade-off: `snippet` is always empty, so Jira/GitLab link detection
+  only scans the Subject line, not the body. Worth knowing, not
+  necessarily worth changing given the stated priority on speed.
+  **Fixed during review:** the UID-cursor tracking read `message.get("_uid")`
+  but the field was actually stored as `"uid"` — this silently broke
+  incremental sync (every run fell back to re-scanning the full date
+  window instead of only what's new). One-line fix; cursor now
+  advances correctly.
 
-- [ ] **Phase 6 — Unified Action Engine**
-  Cross-source Action Required feed + deterministic priority engine
-  (P0–P3) + unified activity feed + notifications. Priority rules will
-  boost anything in the current sprint (or matching the
-  vaultAFTUser/Automation-Defect/Script-Update rule from the Jira JQL)
-  above equivalent non-sprint work — same "ignore Resolved/Closed/
-  Running on GM" exclusions apply here too.
+- [x] **Phase 6 — Unified Action Engine**
+  `app/services/priority_engine.py` (pure, deterministic P0-P3 rules -
+  22 hand-verified assertions) + `app/services/action_engine.py`
+  (aggregates GitLab/Jira/Calendar/Gmail/test-execution data already in
+  the DB into one sorted list). `GET /api/actions/required` (P0-P2, the
+  "respond now" feed) and `GET /api/actions/feed` (everything, spec
+  section 14's broader activity feed). No live calls, no AI - purely
+  deterministic, computed on read (fast enough at single-user scale to
+  not need its own persisted table).
+  **Known limitation:** the "current sprint" boost from the Jira JQL
+  isn't replicated here - we don't sync Jira's sprint field or the
+  "Work Type" custom field (see Phase 3's OpenSearch status-field note
+  for the same class of gap), so the P1 boost only uses the two
+  conditions we do have data for: reporter = vaultAFTUser AND issue
+  type in (Automation, Defect). Close enough for now; tell me the
+  sprint custom field ID if you want it exact.
 
-- [ ] **Phase 7 — AI layer**
-  AIProvider abstraction, async summaries, daily briefing,
-  natural-language search, correlation fallback — all clearly marked as
-  AI-generated and never authoritative.
+- [x] **Phase 7 — AI layer**
+  `app/ai/provider.py` (swappable Mock/OpenAI `AIProvider`, works fully
+  disabled), `app/ai/context_builder.py` (the privacy/speed-critical
+  piece: caps input at 30 items, sends only `priority/source/title`
+  strings from the already-computed action feed - never raw emails,
+  Jira bodies, or DB dumps), `app/services/ai_summary.py` (caches by
+  content hash of the action-item list, so the AI is only called when
+  something actually changed), background scheduler job that
+  pre-generates the briefing every `AI_SUMMARY_INTERVAL_MINUTES` so the
+  dashboard read is always instant. `GET /api/ai/daily-briefing` +
+  `POST /api/ai/daily-briefing/regenerate`.
+  **Not yet built:** natural-language search, correlation fallback
+  (spec section 17) - deferred until the action feed itself has been
+  used for a while and proven useful; no sense building NL search over
+  data you haven't validated the shape of yet.
+
+- [ ] **Frontend** (in progress)
+  Backend for every phase above is done and API-complete. Dashboard UI
+  currently only has System Health, Jira, GitLab (mine/to-review), and
+  Automation Test Status sections from earlier phases. Still needed:
+  Action Required (top of page), AI Daily Briefing, Calendar, Gmail.
 
 ## Open questions to resolve before their phase starts
 
-- **Phase 4 (Calendar)**: what actually backs your org calendar —
-  Google Workspace, Microsoft 365/Exchange, or something else? This
-  decides the API we integrate with (no private iCal URL assumed).
+- ~~**Phase 4 (Calendar)**~~ — resolved: Google Workspace, no live API
+  access possible (see Phase 4 note above) — using .ics import instead.
 - ~~**Phase 2 (Jira/GitLab)**~~ — resolved: both self-hosted, VPN-only,
   PAT auth. Practical implication: the background scheduler will start
   logging auth/connection errors to `sync_status` (visible on
@@ -86,7 +133,7 @@ current one is checked off.
 - **Jenkins (PAT)** — added by you mid-project, not in the original
   spec. Needs its own decision: what should the dashboard actually show
   from Jenkins (build status per MR? per Jira issue? a separate
-  "Builds" section)? Revisit when we reach Phase 3.
+  "Builds" section)? Still undecided.
 - **Mobile**: revisit once Phase 1–6 are solid — likely a lightweight
   read-only PWA against the same backend, tunneled via something like
   Tailscale, per the VPN note in the README.
